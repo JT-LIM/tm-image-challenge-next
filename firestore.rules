@@ -30,8 +30,7 @@ service cloud.firestore {
         allow create: if signedIn()
           && request.resource.data.ownerUid == request.auth.uid
           && request.resource.data.teamName is string
-          && request.resource.data.modelUrl is string
-          && request.resource.data.modelUrl.matches('https://teachablemachine\\.withgoogle\\.com/models/[A-Za-z0-9_-]+/');
+          && request.resource.data.modelUrl is string;
         allow update: if signedIn()
           && resource.data.ownerUid == request.auth.uid
           && request.resource.data.ownerUid == resource.data.ownerUid;
