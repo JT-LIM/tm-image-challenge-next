@@ -449,6 +449,52 @@ button:hover:not(:disabled) {
   font-weight: 900;
 }
 
+.student-welcome {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 22px;
+  align-items: stretch;
+}
+
+.student-welcome p {
+  margin-top: 8px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.student-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.student-guide-grid article {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  border: 1px solid rgba(99, 91, 255, 0.14);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.66);
+  padding: 16px;
+}
+
+.student-guide-grid strong {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  color: #fff;
+  box-shadow: 0 10px 20px rgba(79, 70, 229, 0.2);
+}
+
+.student-guide-grid span {
+  color: #344054;
+  font-weight: 850;
+  line-height: 1.4;
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(300px, 0.9fr) minmax(390px, 1fr) minmax(430px, 1.1fr);
@@ -696,6 +742,8 @@ pre {
   .hero,
   .control-band,
   .create-room,
+  .student-welcome,
+  .student-guide-grid,
   .workspace-grid {
     grid-template-columns: 1fr;
   }

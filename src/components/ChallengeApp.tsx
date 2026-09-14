@@ -27,7 +27,7 @@ import {
   scoreModel,
 } from "@/lib/tm";
 
-export default function ChallengeApp() {
+export default function ChallengeApp({ adminMode = false }: { adminMode?: boolean }) {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [roomCodeInput, setRoomCodeInput] = useState("");
@@ -258,10 +258,12 @@ export default function ChallengeApp() {
     <main className="app-shell">
       <section className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">Live Teachable Machine Challenge</p>
-          <h1>우리 반 AI 모델, 실시간으로 겨뤄보자</h1>
+          <p className="eyebrow">{adminMode ? "Teacher Admin" : "Live Teachable Machine Challenge"}</p>
+          <h1>{adminMode ? "선생님용 AI 챌린지 관리자" : "우리 반 AI 모델, 실시간으로 겨뤄보자"}</h1>
           <p className="hero-description">
-            학생들이 만든 이미지 모델 링크를 제출하면 선생님이 올린 평가 사진으로 바로 채점하고 순위를 공유합니다.
+            {adminMode
+              ? "방을 만들고, 학생 모델 제출 현황을 확인하고, 평가 사진으로 전체 채점을 진행합니다."
+              : "선생님이 알려준 방 코드로 들어와 Teachable Machine 이미지 모델 링크를 제출하세요."}
           </p>
           <div className="hero-actions">
             <form className="join-form" onSubmit={joinRoom}>
@@ -285,9 +287,9 @@ export default function ChallengeApp() {
             {room ? <strong>{room.code}</strong> : <strong>READY</strong>}
           </div>
           <div className="hero-steps">
-            <span>1. 방 만들기</span>
-            <span>2. 모델 제출</span>
-            <span>3. 사진 채점</span>
+            <span>{adminMode ? "1. 방 만들기" : "1. 방 코드 받기"}</span>
+            <span>{adminMode ? "2. 제출 확인" : "2. 모델 제출"}</span>
+            <span>{adminMode ? "3. 사진 채점" : "3. 순위 확인"}</span>
           </div>
           <div className="hero-score">
             <strong>{results[0]?.score ?? 0}</strong>
@@ -311,7 +313,7 @@ export default function ChallengeApp() {
 
       {notice && <div className="notice">{notice}</div>}
 
-      {!room && (
+      {!room && adminMode && (
         <section className="panel create-room">
           <div>
             <span className="section-kicker">Teacher room</span>
@@ -334,6 +336,32 @@ export default function ChallengeApp() {
             </label>
             <button type="submit" disabled={!authReady || busy}>새 방 만들기</button>
           </form>
+        </section>
+      )}
+
+
+
+      {!room && !adminMode && (
+        <section className="panel student-welcome">
+          <div>
+            <span className="section-kicker">Student entrance</span>
+            <h2>학생은 방 코드로만 입장해요</h2>
+            <p>선생님이 만든 방 코드 6자리를 입력하면 팀 이름과 Teachable Machine 모델 링크를 제출할 수 있습니다.</p>
+          </div>
+          <div className="student-guide-grid">
+            <article>
+              <strong>1</strong>
+              <span>선생님에게 방 코드를 받기</span>
+            </article>
+            <article>
+              <strong>2</strong>
+              <span>팀 이름과 모델 링크 제출하기</span>
+            </article>
+            <article>
+              <strong>3</strong>
+              <span>채점 후 실시간 순위 확인하기</span>
+            </article>
+          </div>
         </section>
       )}
 
@@ -361,7 +389,7 @@ export default function ChallengeApp() {
             <SubmissionList submissions={submissions} isTeacher={isTeacher} onRemove={removeSubmission} />
           </section>
 
-          {isTeacher && (
+          {adminMode && isTeacher && (
             <section className="panel teacher-panel">
               <div className="panel-head">
                 <div>
