@@ -256,44 +256,83 @@ export default function ChallengeApp() {
 
   return (
     <main className="app-shell">
-      <section className="topbar">
-        <div>
+      <section className="hero">
+        <div className="hero-copy">
           <p className="eyebrow">Live Teachable Machine Challenge</p>
-          <h1>다같이 들어오는 이미지 모델 채점방</h1>
+          <h1>우리 반 AI 모델, 실시간으로 겨뤄보자</h1>
+          <p className="hero-description">
+            학생들이 만든 이미지 모델 링크를 제출하면 선생님이 올린 평가 사진으로 바로 채점하고 순위를 공유합니다.
+          </p>
+          <div className="hero-actions">
+            <form className="join-form" onSubmit={joinRoom}>
+              <input
+                value={roomCodeInput}
+                onChange={(event) => setRoomCodeInput(normalizeRoomCode(event.target.value))}
+                placeholder="방 코드 입력"
+                aria-label="방 코드"
+              />
+              <button type="submit">입장하기</button>
+            </form>
+            <div className={`status-pill ${authReady ? "ready" : "loading"}`}>
+              <span aria-hidden="true" />
+              {authReady ? "접속 준비 완료" : "익명 접속 준비 중"}
+            </div>
+          </div>
         </div>
-        <div className="status-pill">{authReady ? "접속 준비 완료" : "익명 접속 준비 중"}</div>
+        <div className="hero-card" aria-label="수업 진행 순서">
+          <div className="hero-card-top">
+            <span>CLASSROOM AI</span>
+            {room ? <strong>{room.code}</strong> : <strong>READY</strong>}
+          </div>
+          <div className="hero-steps">
+            <span>1. 방 만들기</span>
+            <span>2. 모델 제출</span>
+            <span>3. 사진 채점</span>
+          </div>
+          <div className="hero-score">
+            <strong>{results[0]?.score ?? 0}</strong>
+            <span>현재 최고점</span>
+          </div>
+        </div>
       </section>
 
-      <section className="control-band">
-        <form className="join-form" onSubmit={joinRoom}>
-          <input
-            value={roomCodeInput}
-            onChange={(event) => setRoomCodeInput(normalizeRoomCode(event.target.value))}
-            placeholder="방 코드"
-            aria-label="방 코드"
-          />
-          <button type="submit">입장</button>
-        </form>
-        {room && (
+      {room && (
+        <section className="control-band">
           <div className="room-code">
-            <span>방 코드</span>
+            <span>현재 방 코드</span>
             <strong>{room.code}</strong>
           </div>
-        )}
-      </section>
+          <div className="room-meta">
+            <span>{submissions.length}팀 제출</span>
+            <span>{results.length}팀 채점 완료</span>
+          </div>
+        </section>
+      )}
 
       {notice && <div className="notice">{notice}</div>}
 
       {!room && (
         <section className="panel create-room">
           <div>
+            <span className="section-kicker">Teacher room</span>
             <h2>교사용 방 만들기</h2>
             <p>라벨 이름은 학생들이 Teachable Machine에서 만든 클래스 이름과 같아야 채점이 정확합니다.</p>
+            <div className="tip-grid">
+              <span>학생은 모델 링크만 제출</span>
+              <span>사진은 선생님 브라우저에만 보관</span>
+              <span>결과는 모든 접속자에게 실시간 공유</span>
+            </div>
           </div>
           <form onSubmit={createRoom} className="create-form">
-            <input name="title" placeholder="수업 이름 예: 3반 분리수거 모델 대회" />
-            <textarea name="labels" rows={4} placeholder="라벨을 쉼표나 줄바꿈으로 입력&#10;예: paper, plastic, can" />
-            <button type="submit" disabled={!authReady || busy}>방 만들기</button>
+            <label>
+              <span>수업 이름</span>
+              <input name="title" placeholder="예: 3반 분리수거 모델 대회" />
+            </label>
+            <label>
+              <span>정답 라벨</span>
+              <textarea name="labels" rows={4} placeholder="라벨을 쉼표나 줄바꿈으로 입력&#10;예: paper, plastic, can" />
+            </label>
+            <button type="submit" disabled={!authReady || busy}>새 방 만들기</button>
           </form>
         </section>
       )}
@@ -303,6 +342,7 @@ export default function ChallengeApp() {
           <section className="panel student-panel">
             <div className="panel-head">
               <div>
+                <span className="section-kicker">{isTeacher ? "Teacher" : "Student"}</span>
                 <h2>{room.title}</h2>
                 <p>{isTeacher ? "교사 화면" : "학생 화면"}</p>
               </div>
@@ -325,6 +365,7 @@ export default function ChallengeApp() {
             <section className="panel teacher-panel">
               <div className="panel-head">
                 <div>
+                    <span className="section-kicker">Scoring photos</span>
                   <h2>평가 사진</h2>
                   <p>정답 사진은 선생님 브라우저에만 머뭅니다.</p>
                 </div>
@@ -332,7 +373,8 @@ export default function ChallengeApp() {
               </div>
               <label className="drop-zone">
                 <input type="file" accept="image/*" multiple onChange={(event) => addPhotos(event.target.files)} />
-                사진 선택
+                <strong>평가 사진 선택</strong>
+                <span>여러 장을 한 번에 올릴 수 있어요</span>
               </label>
               <div className="photo-grid">
                 {photos.map((photo) => (
@@ -356,6 +398,7 @@ export default function ChallengeApp() {
           <section className="panel results-panel">
             <div className="panel-head">
               <div>
+                <span className="section-kicker">Leaderboard</span>
                 <h2>실시간 순위</h2>
                 <p>교사가 채점하면 모든 접속자에게 결과가 표시됩니다.</p>
               </div>
@@ -434,7 +477,7 @@ function ResultsTable({ results }: { results: ChallengeResult[] }) {
         <tbody>
           {results.map((result) => (
             <tr key={result.id}>
-              <td>{result.rank}</td>
+              <td><span className="rank-badge">{result.rank}</span></td>
               <td>{result.teamName}</td>
               <td><strong>{result.score}점</strong></td>
               <td>{result.correct}/{result.total}</td>
