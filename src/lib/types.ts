@@ -34,6 +34,10 @@ export type ChallengeResult = {
   total: number;
   averageConfidence: number;
   misses: ResultItem[];
+  lastAnswer?: string;
+  lastPredicted?: string;
+  lastConfidence?: number;
+  lastCorrect?: boolean;
   updatedAt?: unknown;
 };
 

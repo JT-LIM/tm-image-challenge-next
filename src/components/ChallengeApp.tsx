@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   onSnapshot,
@@ -35,7 +34,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   const [room, setRoom] = useState<ChallengeRoom | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [results, setResults] = useState<ChallengeResult[]>([]);
-  const [photos, setPhotos] = useState<EvaluationPhoto[]>([]);
+  const [challengePhoto, setChallengePhoto] = useState<EvaluationPhoto | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -87,14 +86,15 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
 
   useEffect(() => {
     return () => {
-      photos.forEach((photo) => URL.revokeObjectURL(photo.url));
+      if (challengePhoto) URL.revokeObjectURL(challengePhoto.url);
     };
-  }, [photos]);
+  }, [challengePhoto]);
 
   async function createRoom(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!firebase || !user) return;
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     const title = normalizeText(String(form.get("title") || "")) || "이미지 모델 챌린지";
     const labels = parseLabels(String(form.get("labels") || ""));
     if (labels.length < 2) {
@@ -121,7 +121,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       setActiveCode(code);
       setRoomCodeInput(code);
       setNotice("방이 만들어졌어요. 학생들에게 방 코드를 알려주세요.");
-      event.currentTarget.reset();
+      formElement.reset();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "방 만들기 실패");
     } finally {
@@ -171,32 +171,35 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
 
   async function removeSubmission(submissionId: string) {
     if (!firebase || !room) return;
-    await deleteDoc(doc(firebase.db, "rooms", room.code, "submissions", submissionId));
+    const batch = writeBatch(firebase.db);
+    batch.delete(doc(firebase.db, "rooms", room.code, "submissions", submissionId));
+    if (isTeacher) batch.delete(doc(firebase.db, "rooms", room.code, "results", submissionId));
+    await batch.commit();
   }
 
-  function addPhotos(files: FileList | null) {
-    if (!files) return;
-    const nextPhotos = Array.from(files)
-      .filter((file) => file.type.startsWith("image/"))
-      .map((file) => ({
+  function setScoringPhoto(files: FileList | null) {
+    const file = Array.from(files || []).find((item) => item.type.startsWith("image/"));
+    if (!file) return;
+    setChallengePhoto((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return {
         id: `${file.name}-${crypto.randomUUID()}`,
         file,
         name: file.name.replace(/\.[^.]+$/, ""),
         url: URL.createObjectURL(file),
         answer: room?.labels[0] || "",
-      }));
-    setPhotos((current) => [...current, ...nextPhotos]);
+      };
+    });
   }
 
-  function updatePhoto(photoId: string, patch: Partial<EvaluationPhoto>) {
-    setPhotos((current) => current.map((photo) => (photo.id === photoId ? { ...photo, ...patch } : photo)));
+  function updateScoringPhoto(patch: Partial<EvaluationPhoto>) {
+    setChallengePhoto((current) => (current ? { ...current, ...patch } : current));
   }
 
-  function removePhoto(photoId: string) {
-    setPhotos((current) => {
-      const photo = current.find((item) => item.id === photoId);
-      if (photo) URL.revokeObjectURL(photo.url);
-      return current.filter((item) => item.id !== photoId);
+  function clearScoringPhoto() {
+    setChallengePhoto((current) => {
+      if (current) URL.revokeObjectURL(current.url);
+      return null;
     });
   }
 
@@ -206,34 +209,39 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       setNotice("제출된 학생 모델이 없습니다.");
       return;
     }
-    if (!photos.length || photos.some((photo) => !photo.answer)) {
-      setNotice("평가 사진과 정답을 모두 넣어주세요.");
+    if (!challengePhoto?.answer) {
+      setNotice("채점할 사진과 정답을 넣어주세요.");
       return;
     }
     setBusy(true);
-    setNotice("채점 중입니다. 모델 수가 많으면 시간이 조금 걸려요.");
+    setNotice("사진 한 장으로 전체 모델을 채점 중입니다.");
     try {
       const scored = [];
       for (const submission of submissions) {
-        const items = await scoreModel(submission.modelUrl, photos);
-        const correct = items.filter((item) => item.correct).length;
-        const averageConfidence = items.reduce((sum, item) => sum + item.confidence, 0) / items.length;
+        const previous = results.find((result) => result.id === submission.id);
+        const [item] = await scoreModel(submission.modelUrl, [challengePhoto]);
+        const previousTotal = previous?.total || 0;
+        const previousCorrect = previous?.correct || 0;
+        const total = previousTotal + 1;
+        const correct = previousCorrect + (item.correct ? 1 : 0);
+        const averageConfidence = ((previous?.averageConfidence || 0) * previousTotal + item.confidence) / total;
         scored.push({
           id: submission.id,
           teamName: submission.teamName,
           modelUrl: submission.modelUrl,
-          score: Math.round((correct / items.length) * 100),
+          score: correct,
           correct,
-          total: items.length,
+          total,
           averageConfidence,
-          misses: items.filter((item) => !item.correct),
+          misses: item.correct ? (previous?.misses || []) : [item, ...(previous?.misses || [])].slice(0, 5),
+          lastAnswer: item.answer,
+          lastPredicted: item.predicted,
+          lastConfidence: item.confidence,
+          lastCorrect: item.correct,
         });
       }
       scored.sort((a, b) => b.score - a.score || b.averageConfidence - a.averageConfidence || a.teamName.localeCompare(b.teamName));
       const batch = writeBatch(firebase.db);
-      results.forEach((result) => {
-        batch.delete(doc(firebase.db, "rooms", room.code, "results", result.id));
-      });
       scored.forEach((result, index) => {
         batch.set(doc(firebase.db, "rooms", room.code, "results", result.id), {
           ...result,
@@ -242,7 +250,8 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
         });
       });
       await batch.commit();
-      setNotice("채점이 완료됐어요. 학생 화면에도 순위가 보입니다.");
+      const winners = scored.filter((result) => result.lastCorrect).map((result) => result.teamName);
+      setNotice(winners.length ? `이번 사진 정답 팀: ${winners.join(", ")}` : "이번 사진을 맞춘 팀이 없습니다.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "채점 실패");
     } finally {
@@ -262,7 +271,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
           <h1>{adminMode ? "선생님용 AI 챌린지 관리자" : "우리 반 AI 모델, 실시간으로 겨뤄보자"}</h1>
           <p className="hero-description">
             {adminMode
-              ? "방을 만들고, 학생 모델 제출 현황을 확인하고, 평가 사진으로 전체 채점을 진행합니다."
+              ? "방을 만들고, 사진 한 장을 바로 채점해 맞춘 팀의 점수를 실시간으로 올립니다."
               : "선생님이 알려준 방 코드로 들어와 Teachable Machine 이미지 모델 링크를 제출하세요."}
           </p>
           <div className="hero-actions">
@@ -289,7 +298,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
           <div className="hero-steps">
             <span>{adminMode ? "1. 방 만들기" : "1. 방 코드 받기"}</span>
             <span>{adminMode ? "2. 제출 확인" : "2. 모델 제출"}</span>
-            <span>{adminMode ? "3. 사진 채점" : "3. 순위 확인"}</span>
+            <span>{adminMode ? "3. 바로 채점" : "3. 순위 확인"}</span>
           </div>
           <div className="hero-score">
             <strong>{results[0]?.score ?? 0}</strong>
@@ -306,7 +315,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
           </div>
           <div className="room-meta">
             <span>{submissions.length}팀 제출</span>
-            <span>{results.length}팀 채점 완료</span>
+            <span>{results[0]?.total || 0}문제 진행</span>
           </div>
         </section>
       )}
@@ -338,8 +347,6 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
           </form>
         </section>
       )}
-
-
 
       {!room && !adminMode && (
         <section className="panel student-welcome">
@@ -393,32 +400,40 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
             <section className="panel teacher-panel">
               <div className="panel-head">
                 <div>
-                    <span className="section-kicker">Scoring photos</span>
-                  <h2>평가 사진</h2>
-                  <p>정답 사진은 선생님 브라우저에만 머뭅니다.</p>
+                    <span className="section-kicker">Instant scoring</span>
+                  <h2>사진 바로 채점</h2>
+                  <p>사진 한 장을 넣으면 제출된 모든 모델을 즉시 채점하고 맞춘 팀 점수를 올립니다.</p>
                 </div>
-                <span className="badge">{photos.length}장</span>
+                <span className="badge">{challengePhoto ? "사진 준비" : "사진 없음"}</span>
               </div>
               <label className="drop-zone">
-                <input type="file" accept="image/*" multiple onChange={(event) => addPhotos(event.target.files)} />
-                <strong>평가 사진 선택</strong>
-                <span>여러 장을 한 번에 올릴 수 있어요</span>
+                <input type="file" accept="image/*" onChange={(event) => setScoringPhoto(event.target.files)} />
+                <strong>채점할 사진 넣기</strong>
+                <span>사진 한 장을 넣고 정답 라벨을 고르세요</span>
               </label>
-              <div className="photo-grid">
-                {photos.map((photo) => (
-                  <article className="photo-card" key={photo.id}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={photo.url} alt={photo.name} />
-                    <input value={photo.name} onChange={(event) => updatePhoto(photo.id, { name: event.target.value })} aria-label="사진 이름" />
-                    <select value={photo.answer} onChange={(event) => updatePhoto(photo.id, { answer: event.target.value })} aria-label="정답">
-                      {room.labels.map((label) => <option key={label} value={label}>{label}</option>)}
-                    </select>
-                    <button type="button" onClick={() => removePhoto(photo.id)}>삭제</button>
-                  </article>
-                ))}
-              </div>
-              <button className="score-button" type="button" onClick={runScoring} disabled={busy}>
-                {busy ? "채점 중" : "전체 채점 시작"}
+              {challengePhoto ? (
+                <article className="instant-photo-card">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={challengePhoto.url} alt={challengePhoto.name} />
+                  <div className="instant-photo-form">
+                    <label>
+                      <span>사진 이름</span>
+                      <input value={challengePhoto.name} onChange={(event) => updateScoringPhoto({ name: event.target.value })} aria-label="사진 이름" />
+                    </label>
+                    <label>
+                      <span>정답</span>
+                      <select value={challengePhoto.answer} onChange={(event) => updateScoringPhoto({ answer: event.target.value })} aria-label="정답">
+                        {room.labels.map((label) => <option key={label} value={label}>{label}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" onClick={clearScoringPhoto}>사진 바꾸기</button>
+                  </div>
+                </article>
+              ) : (
+                <p className="empty">아직 채점할 사진이 없습니다. 사진을 넣으면 바로 점수 라운드를 시작할 수 있어요.</p>
+              )}
+              <button className="score-button" type="button" onClick={runScoring} disabled={busy || !challengePhoto}>
+                {busy ? "채점 중" : "이 사진으로 바로 채점"}
               </button>
             </section>
           )}
@@ -428,7 +443,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
               <div>
                 <span className="section-kicker">Leaderboard</span>
                 <h2>실시간 순위</h2>
-                <p>교사가 채점하면 모든 접속자에게 결과가 표시됩니다.</p>
+                <p>사진을 맞춘 팀은 바로 1점씩 올라갑니다.</p>
               </div>
               <span className="badge">{results.length}팀</span>
             </div>
@@ -497,9 +512,9 @@ function ResultsTable({ results }: { results: ChallengeResult[] }) {
             <th>순위</th>
             <th>팀</th>
             <th>점수</th>
-            <th>정답</th>
+            <th>맞힌 문제</th>
+            <th>최근 판정</th>
             <th>평균 확신도</th>
-            <th>오답</th>
           </tr>
         </thead>
         <tbody>
@@ -509,12 +524,15 @@ function ResultsTable({ results }: { results: ChallengeResult[] }) {
               <td>{result.teamName}</td>
               <td><strong>{result.score}점</strong></td>
               <td>{result.correct}/{result.total}</td>
-              <td>{Math.round(result.averageConfidence * 100)}%</td>
               <td>
-                {result.misses.length
-                  ? result.misses.map((miss) => `${miss.photoName}: ${miss.answer} → ${miss.predicted || "실패"}`).join(", ")
-                  : "없음"}
+                <span className={`judgement-pill ${result.lastCorrect ? "correct" : "wrong"}`}>
+                  {result.lastCorrect ? "정답" : "오답"}
+                </span>
+                <span className="prediction-text">
+                  {result.lastAnswer ? `${result.lastAnswer} → ${result.lastPredicted || "실패"}` : "아직 최근 판정 없음"}
+                </span>
               </td>
+              <td>{Math.round((result.averageConfidence || 0) * 100)}%</td>
             </tr>
           ))}
         </tbody>
