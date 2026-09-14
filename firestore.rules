@@ -1,0 +1,48 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function room(roomId) {
+      return get(/databases/$(database)/documents/rooms/$(roomId));
+    }
+
+    function isTeacher(roomId) {
+      return signedIn() && room(roomId).data.teacherUid == request.auth.uid;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.teacherUid == request.auth.uid
+        && request.resource.data.labels is list
+        && request.resource.data.labels.size() >= 2
+        && request.resource.data.title is string;
+      allow update: if isTeacher(roomId)
+        && request.resource.data.teacherUid == resource.data.teacherUid;
+      allow delete: if isTeacher(roomId);
+
+      match /submissions/{submissionId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.ownerUid == request.auth.uid
+          && request.resource.data.teamName is string
+          && request.resource.data.modelUrl is string
+          && request.resource.data.modelUrl.matches('https://teachablemachine\\.withgoogle\\.com/models/[A-Za-z0-9_-]+/');
+        allow update: if signedIn()
+          && resource.data.ownerUid == request.auth.uid
+          && request.resource.data.ownerUid == resource.data.ownerUid;
+        allow delete: if signedIn()
+          && (resource.data.ownerUid == request.auth.uid || isTeacher(roomId));
+      }
+
+      match /results/{resultId} {
+        allow read: if signedIn();
+        allow write: if isTeacher(roomId);
+      }
+    }
+  }
+}
