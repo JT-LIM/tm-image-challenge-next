@@ -905,3 +905,115 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+
+.room-list-panel {
+  margin-bottom: 16px;
+}
+
+.room-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.room-card {
+  display: grid;
+  gap: 8px;
+  min-height: 132px;
+  border: 1px solid rgba(99, 91, 255, 0.16);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(99, 91, 255, 0.11), transparent 42%),
+    rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  padding: 16px;
+  text-align: left;
+  box-shadow: var(--shadow-soft);
+}
+
+.room-card span {
+  width: fit-content;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: var(--accent-dark);
+  padding: 5px 9px;
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+}
+
+.room-card strong {
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.room-card small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.ghost-button {
+  min-height: 42px;
+  background: #fff;
+  border: 1px solid rgba(99, 91, 255, 0.18);
+  box-shadow: none;
+  color: var(--accent-dark);
+  padding: 0 14px;
+}
+
+.submission-list-wrap {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(99, 91, 255, 0.14);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 10px;
+}
+
+.selection-actions span {
+  margin-right: auto;
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.selection-actions button {
+  min-height: 34px;
+  border: 1px solid rgba(99, 91, 255, 0.18);
+  background: #fff;
+  box-shadow: none;
+  color: var(--accent-dark);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.submission-card.selected {
+  border-color: rgba(99, 91, 255, 0.42);
+  background: rgba(238, 242, 255, 0.82);
+}
+
+.select-model-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.select-model-check input {
+  width: 18px;
+  min-height: 18px;
+  accent-color: var(--accent);
+}

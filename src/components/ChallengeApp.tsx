@@ -11,7 +11,6 @@ import {
   query,
   serverTimestamp,
   setDoc,
-  updateDoc,
   writeBatch,
 } from "firebase/firestore";
 import { onAuthStateChanged, signInAnonymously, type User } from "firebase/auth";
@@ -20,7 +19,6 @@ import type { ChallengeResult, ChallengeRoom, EvaluationPhoto, Submission } from
 import {
   createRoomCode,
   normalizeModelUrl,
-  normalizeRoomCode,
   normalizeText,
   parseLabels,
   scoreModel,
@@ -29,11 +27,12 @@ import {
 export default function ChallengeApp({ adminMode = false }: { adminMode?: boolean }) {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [roomCodeInput, setRoomCodeInput] = useState("");
   const [activeCode, setActiveCode] = useState("");
+  const [rooms, setRooms] = useState<ChallengeRoom[]>([]);
   const [room, setRoom] = useState<ChallengeRoom | null>(null);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [results, setResults] = useState<ChallengeResult[]>([]);
+  const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<string[]>([]);
   const [challengePhoto, setChallengePhoto] = useState<EvaluationPhoto | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -46,6 +45,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   const isTeacher = Boolean(user && room && user.uid === room.teacherUid);
   const canManageRoom = adminMode && isTeacher;
   const canSubmitModel = Boolean(room && !adminMode);
+  const selectedSubmissions = submissions.filter((submission) => selectedSubmissionIds.includes(submission.id));
 
   useEffect(() => {
     if (!firebase) return;
@@ -61,11 +61,19 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   }, [firebase]);
 
   useEffect(() => {
+    if (!firebase) return;
+    const unsubRooms = onSnapshot(query(collection(firebase.db, "rooms"), orderBy("createdAt", "desc")), (snapshot) => {
+      setRooms(snapshot.docs.map((item) => ({ code: item.id, ...item.data() } as ChallengeRoom)));
+    });
+    return () => unsubRooms();
+  }, [firebase]);
+
+  useEffect(() => {
     if (!firebase || !activeCode) return;
     const roomRef = doc(firebase.db, "rooms", activeCode);
     const unsubRoom = onSnapshot(roomRef, (snapshot) => {
       setRoom(snapshot.exists() ? ({ code: snapshot.id, ...snapshot.data() } as ChallengeRoom) : null);
-      if (!snapshot.exists()) setNotice("방을 찾을 수 없어요. 코드를 다시 확인하세요.");
+      if (!snapshot.exists()) setNotice("방을 찾을 수 없어요. 목록에서 다시 선택하세요.");
     });
     const unsubSubmissions = onSnapshot(
       query(collection(firebase.db, "rooms", activeCode, "submissions"), orderBy("createdAt", "asc")),
@@ -91,6 +99,15 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       if (challengePhoto) URL.revokeObjectURL(challengePhoto.url);
     };
   }, [challengePhoto]);
+
+  function leaveRoom() {
+    setActiveCode("");
+    setRoom(null);
+    setSubmissions([]);
+    setResults([]);
+    setSelectedSubmissionIds([]);
+    setNotice("");
+  }
 
   async function createRoom(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -121,26 +138,13 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
         updatedAt: serverTimestamp(),
       });
       setActiveCode(code);
-      setRoomCodeInput(code);
-      setNotice("방이 만들어졌어요. 학생들에게 방 코드를 알려주세요.");
+      setNotice("방이 만들어졌어요. 학생들은 목록에서 바로 들어갈 수 있습니다.");
       formElement.reset();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "방 만들기 실패");
     } finally {
       setBusy(false);
     }
-  }
-
-  function joinRoom(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const code = normalizeRoomCode(roomCodeInput);
-    if (!code) {
-      setNotice("방 코드를 입력하세요.");
-      return;
-    }
-    setActiveCode(code);
-    setRoomCodeInput(code);
-    setNotice("");
   }
 
   async function submitModel(event: React.FormEvent<HTMLFormElement>) {
@@ -153,22 +157,15 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       setNotice("팀 이름을 입력하세요.");
       return;
     }
-    const existing = submissions.find((submission) => submission.ownerUid === user.uid);
-    const payload = {
+    await addDoc(collection(firebase.db, "rooms", room.code, "submissions"), {
       teamName,
       modelUrl,
       ownerUid: user.uid,
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    };
-    if (existing) {
-      await updateDoc(doc(firebase.db, "rooms", room.code, "submissions", existing.id), payload);
-    } else {
-      await addDoc(collection(firebase.db, "rooms", room.code, "submissions"), {
-        ...payload,
-        createdAt: serverTimestamp(),
-      });
-    }
-    setNotice("모델이 제출됐어요.");
+    });
+    event.currentTarget.reset();
+    setNotice("모델이 제출됐어요. 같은 조 이름으로 모델을 더 올릴 수 있습니다.");
   }
 
   async function removeSubmission(submissionId: string) {
@@ -176,7 +173,23 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
     const batch = writeBatch(firebase.db);
     batch.delete(doc(firebase.db, "rooms", room.code, "submissions", submissionId));
     if (isTeacher) batch.delete(doc(firebase.db, "rooms", room.code, "results", submissionId));
+    setSelectedSubmissionIds((current) => current.filter((id) => id !== submissionId));
     await batch.commit();
+  }
+
+  function toggleSubmission(submissionId: string, checked: boolean) {
+    setSelectedSubmissionIds((current) => {
+      if (checked) return current.includes(submissionId) ? current : [...current, submissionId];
+      return current.filter((id) => id !== submissionId);
+    });
+  }
+
+  function selectAllSubmissions() {
+    setSelectedSubmissionIds(submissions.map((submission) => submission.id));
+  }
+
+  function clearSelectedSubmissions() {
+    setSelectedSubmissionIds([]);
   }
 
   function setScoringPhoto(files: FileList | null) {
@@ -211,6 +224,10 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       setNotice("제출된 학생 모델이 없습니다.");
       return;
     }
+    if (!selectedSubmissions.length) {
+      setNotice("채점할 모델을 하나 이상 선택해주세요.");
+      return;
+    }
     if (!challengePhoto?.answer) {
       setNotice("채점할 사진과 정답을 넣어주세요.");
       return;
@@ -219,7 +236,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
     setNotice("사진 한 장으로 전체 모델을 채점 중입니다.");
     try {
       const scored = [];
-      for (const submission of submissions) {
+      for (const submission of selectedSubmissions) {
         const previous = results.find((result) => result.id === submission.id);
         const [item] = await scoreModel(submission.modelUrl, [challengePhoto]);
         const previousTotal = previous?.total || 0;
@@ -229,6 +246,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
         const averageConfidence = ((previous?.averageConfidence || 0) * previousTotal + item.confidence) / total;
         scored.push({
           id: submission.id,
+          rank: previous?.rank || 0,
           teamName: submission.teamName,
           modelUrl: submission.modelUrl,
           score: correct,
@@ -242,9 +260,13 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
           lastCorrect: item.correct,
         });
       }
-      scored.sort((a, b) => b.score - a.score || b.averageConfidence - a.averageConfidence || a.teamName.localeCompare(b.teamName));
+      const mergedResults = new Map(results.map((result) => [result.id, result]));
+      scored.forEach((result) => mergedResults.set(result.id, result));
+      const ranked = Array.from(mergedResults.values()).sort(
+        (a, b) => b.score - a.score || b.averageConfidence - a.averageConfidence || a.teamName.localeCompare(b.teamName)
+      );
       const batch = writeBatch(firebase.db);
-      scored.forEach((result, index) => {
+      ranked.forEach((result, index) => {
         batch.set(doc(firebase.db, "rooms", room.code, "results", result.id), {
           ...result,
           rank: index + 1,
@@ -269,23 +291,14 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
     <main className="app-shell">
       <section className="hero">
         <div className="hero-copy">
-          <p className="eyebrow">{adminMode ? "Teacher Admin" : "Live Teachable Machine Challenge"}</p>
-          <h1>{adminMode ? "선생님용 AI 챌린지 관리자" : "우리 반 AI 모델, 실시간으로 겨뤄보자"}</h1>
+          <p className="eyebrow">{adminMode ? "Teacher Admin" : "Deokso Middle School"}</p>
+          <h1>{adminMode ? "덕소중학교 AI 이미지 분류 관리자" : "덕소중학교 AI 이미지 분류"}</h1>
           <p className="hero-description">
             {adminMode
-              ? "방을 만들고, 사진 한 장을 바로 채점해 맞춘 팀의 점수를 실시간으로 올립니다."
-              : "선생님이 알려준 방 코드로 들어와 Teachable Machine 이미지 모델 링크를 제출하세요."}
+              ? "방을 만들고, 제출된 모델 중 원하는 모델을 선택해 사진 정답을 확인합니다."
+              : "방을 선택해서 들어가고, 조 이름으로 Teachable Machine 이미지 모델을 여러 개 제출하세요."}
           </p>
           <div className="hero-actions">
-            <form className="join-form" onSubmit={joinRoom}>
-              <input
-                value={roomCodeInput}
-                onChange={(event) => setRoomCodeInput(normalizeRoomCode(event.target.value))}
-                placeholder="방 코드 입력"
-                aria-label="방 코드"
-              />
-              <button type="submit">입장하기</button>
-            </form>
             <div className={`status-pill ${authReady ? "ready" : "loading"}`}>
               <span aria-hidden="true" />
               {authReady ? "접속 준비 완료" : "익명 접속 준비 중"}
@@ -295,12 +308,12 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
         <div className="hero-card" aria-label="수업 진행 순서">
           <div className="hero-card-top">
             <span>CLASSROOM AI</span>
-            {room ? <strong>{room.code}</strong> : <strong>READY</strong>}
+            {room ? <strong>{room.code}</strong> : <strong>{rooms.length} ROOMS</strong>}
           </div>
           <div className="hero-steps">
-            <span>{adminMode ? "1. 방 만들기" : "1. 방 코드 받기"}</span>
-            <span>{adminMode ? "2. 제출 확인" : "2. 모델 제출"}</span>
-            <span>{adminMode ? "3. 바로 채점" : "3. 순위 확인"}</span>
+            <span>{adminMode ? "1. 방 만들기" : "1. 방 선택"}</span>
+            <span>{adminMode ? "2. 모델 선택" : "2. 모델 여러 개 제출"}</span>
+            <span>{adminMode ? "3. 정답 확인" : "3. 순위 확인"}</span>
           </div>
           <div className="hero-score">
             <strong>{results[0]?.score ?? 0}</strong>
@@ -311,12 +324,13 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
 
       {room && (
         <section className="control-band">
+          <button className="ghost-button" type="button" onClick={leaveRoom}>방 목록으로</button>
           <div className="room-code">
-            <span>현재 방 코드</span>
-            <strong>{room.code}</strong>
+            <span>현재 방</span>
+            <strong>{room.title}</strong>
           </div>
           <div className="room-meta">
-            <span>{submissions.length}팀 제출</span>
+            <span>{submissions.length}개 모델 제출</span>
             <span>{results[0]?.total || 0}문제 진행</span>
           </div>
         </section>
@@ -324,12 +338,19 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
 
       {notice && <div className="notice">{notice}</div>}
 
+      {!room && (
+        <RoomList rooms={rooms} adminMode={adminMode} onEnter={(code) => {
+          setActiveCode(code);
+          setNotice("");
+        }} />
+      )}
+
       {!room && adminMode && (
         <section className="panel create-room">
           <div>
             <span className="section-kicker">Teacher room</span>
             <h2>교사용 방 만들기</h2>
-            <p>라벨 이름은 학생들이 Teachable Machine에서 만든 클래스 이름과 같아야 채점이 정확합니다.</p>
+            <p>방을 만들면 학생 화면 방 목록에 바로 나타납니다. 라벨 이름은 학생 모델의 클래스 이름과 같아야 합니다.</p>
             <div className="tip-grid">
               <span>학생은 모델 링크만 제출</span>
               <span>사진은 선생님 브라우저에만 보관</span>
@@ -354,21 +375,21 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
         <section className="panel student-welcome">
           <div>
             <span className="section-kicker">Student entrance</span>
-            <h2>학생은 방 코드로만 입장해요</h2>
-            <p>선생님이 만든 방 코드 6자리를 입력하면 팀 이름과 Teachable Machine 모델 링크를 제출할 수 있습니다.</p>
+            <h2>방을 선택해서 입장해요</h2>
+            <p>목록에서 수업 방을 누른 뒤 조 이름과 Teachable Machine 모델 링크를 제출합니다.</p>
           </div>
           <div className="student-guide-grid">
             <article>
               <strong>1</strong>
-              <span>선생님에게 방 코드를 받기</span>
+              <span>방 목록에서 내 수업 선택</span>
             </article>
             <article>
               <strong>2</strong>
-              <span>팀 이름과 모델 링크 제출하기</span>
+              <span>조 이름으로 모델 여러 개 제출</span>
             </article>
             <article>
               <strong>3</strong>
-              <span>채점 후 실시간 순위 확인하기</span>
+              <span>선택 채점 후 순위 확인</span>
             </article>
           </div>
         </section>
@@ -381,7 +402,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
               <div>
                 <span className="section-kicker">{canManageRoom ? "Teacher" : "Student"}</span>
                 <h2>{room.title}</h2>
-                <p>{canManageRoom ? "교사 화면" : "학생 화면"}</p>
+                <p>{canManageRoom ? "관리자 화면" : "학생 화면"}</p>
               </div>
               <span className="badge">{submissions.length}팀 제출</span>
             </div>
@@ -390,9 +411,9 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
             </div>
             {canSubmitModel && (
               <form className="model-form" onSubmit={submitModel}>
-                <input name="teamName" placeholder="팀 이름" defaultValue={submissions.find((item) => item.ownerUid === user?.uid)?.teamName || ""} />
+                <input name="teamName" placeholder="조 이름 예: 1조" />
                 <div className="model-link-row">
-                  <input name="modelUrl" placeholder="Teachable Machine 모델 링크" defaultValue={submissions.find((item) => item.ownerUid === user?.uid)?.modelUrl || ""} />
+                  <input name="modelUrl" placeholder="Teachable Machine 모델 링크" />
                   <a className="tm-link-button" href="https://teachablemachine.withgoogle.com/train/image" target="_blank" rel="noreferrer">
                     티쳐블머신 열기
                   </a>
@@ -400,7 +421,15 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
                 <button type="submit">모델 제출</button>
               </form>
             )}
-            <SubmissionList submissions={submissions} isTeacher={canManageRoom} onRemove={removeSubmission} />
+            <SubmissionList
+              submissions={submissions}
+              isTeacher={canManageRoom}
+              selectedIds={selectedSubmissionIds}
+              onToggle={toggleSubmission}
+              onSelectAll={selectAllSubmissions}
+              onClearSelected={clearSelectedSubmissions}
+              onRemove={removeSubmission}
+            />
           </section>
 
           {canManageRoom && (
@@ -408,15 +437,15 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
               <div className="panel-head">
                 <div>
                     <span className="section-kicker">Instant scoring</span>
-                  <h2>사진 바로 채점</h2>
-                  <p>사진 한 장을 넣으면 제출된 모든 모델을 즉시 채점하고 맞춘 팀 점수를 올립니다.</p>
+                  <h2>선택 모델 정답 확인</h2>
+                  <p>제출 목록에서 선택한 모델만 사진 한 장으로 판정하고 맞춘 모델의 점수를 올립니다.</p>
                 </div>
                 <span className="badge">{challengePhoto ? "사진 준비" : "사진 없음"}</span>
               </div>
               <label className="drop-zone">
                 <input type="file" accept="image/*" onChange={(event) => setScoringPhoto(event.target.files)} />
-                <strong>채점할 사진 넣기</strong>
-                <span>사진 한 장을 넣고 정답 라벨을 고르세요</span>
+                <strong>정답 확인할 사진 넣기</strong>
+                <span>사진 한 장과 정답 라벨을 고른 뒤 선택 모델을 확인하세요</span>
               </label>
               {challengePhoto ? (
                 <article className="instant-photo-card">
@@ -437,10 +466,10 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
                   </div>
                 </article>
               ) : (
-                <p className="empty">아직 채점할 사진이 없습니다. 사진을 넣으면 바로 점수 라운드를 시작할 수 있어요.</p>
+                <p className="empty">아직 확인할 사진이 없습니다. 사진을 넣고 모델을 선택하면 정답 확인을 시작할 수 있어요.</p>
               )}
-              <button className="score-button" type="button" onClick={runScoring} disabled={busy || !challengePhoto}>
-                {busy ? "채점 중" : "이 사진으로 바로 채점"}
+              <button className="score-button" type="button" onClick={runScoring} disabled={busy || !challengePhoto || !selectedSubmissions.length}>
+                {busy ? "확인 중" : `선택한 ${selectedSubmissions.length}개 모델 정답 확인`}
               </button>
             </section>
           )}
@@ -450,7 +479,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
               <div>
                 <span className="section-kicker">Leaderboard</span>
                 <h2>실시간 순위</h2>
-                <p>사진을 맞춘 팀은 바로 1점씩 올라갑니다.</p>
+                <p>선택한 모델을 확인하면 맞춘 모델은 바로 1점씩 올라갑니다.</p>
               </div>
               <span className="badge">{results.length}팀</span>
             </div>
@@ -484,25 +513,80 @@ function FirebaseSetup({ missingKeys }: { missingKeys: string[] }) {
   );
 }
 
-function SubmissionList({ submissions, isTeacher, onRemove }: {
+function RoomList({ rooms, adminMode, onEnter }: {
+  rooms: ChallengeRoom[];
+  adminMode: boolean;
+  onEnter: (code: string) => void;
+}) {
+  return (
+    <section className="panel room-list-panel">
+      <div className="panel-head">
+        <div>
+          <span className="section-kicker">Rooms</span>
+          <h2>{adminMode ? "관리할 방 선택" : "참여할 방 선택"}</h2>
+          <p>{adminMode ? "방을 누르면 제출 모델을 확인하고 정답 확인을 할 수 있습니다." : "선생님이 만든 방을 누르면 바로 모델을 제출할 수 있습니다."}</p>
+        </div>
+        <span className="badge">{rooms.length}개 방</span>
+      </div>
+      {rooms.length ? (
+        <div className="room-card-grid">
+          {rooms.map((item) => (
+            <button className="room-card" type="button" key={item.code} onClick={() => onEnter(item.code)}>
+              <span>{item.code}</span>
+              <strong>{item.title}</strong>
+              <small>{item.labels.join(" · ")}</small>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p className="empty">아직 만들어진 방이 없습니다.</p>
+      )}
+    </section>
+  );
+}
+
+function SubmissionList({ submissions, isTeacher, selectedIds, onToggle, onSelectAll, onClearSelected, onRemove }: {
   submissions: Submission[];
   isTeacher: boolean;
+  selectedIds: string[];
+  onToggle: (submissionId: string, checked: boolean) => void;
+  onSelectAll: () => void;
+  onClearSelected: () => void;
   onRemove: (submissionId: string) => void;
 }) {
   if (!submissions.length) {
     return <p className="empty">아직 제출된 모델이 없습니다.</p>;
   }
   return (
-    <div className="submission-list">
-      {submissions.map((submission) => (
-        <article key={submission.id} className="submission-card">
-          <div>
-            <strong>{submission.teamName}</strong>
-            <span>{submission.modelUrl}</span>
-          </div>
-          {isTeacher && <button type="button" onClick={() => onRemove(submission.id)}>삭제</button>}
-        </article>
-      ))}
+    <div className="submission-list-wrap">
+      {isTeacher && (
+        <div className="selection-actions">
+          <span>{selectedIds.length}개 선택됨</span>
+          <button type="button" onClick={onSelectAll}>전체 선택</button>
+          <button type="button" onClick={onClearSelected}>선택 해제</button>
+        </div>
+      )}
+      <div className="submission-list">
+        {submissions.map((submission) => (
+          <article key={submission.id} className={`submission-card ${selectedIds.includes(submission.id) ? "selected" : ""}`}>
+            {isTeacher && (
+              <label className="select-model-check">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.includes(submission.id)}
+                  onChange={(event) => onToggle(submission.id, event.target.checked)}
+                />
+                <span>선택</span>
+              </label>
+            )}
+            <div>
+              <strong>{submission.teamName}</strong>
+              <span>{submission.modelUrl}</span>
+            </div>
+            {isTeacher && <button type="button" onClick={() => onRemove(submission.id)}>삭제</button>}
+          </article>
+        ))}
+      </div>
     </div>
   );
 }
