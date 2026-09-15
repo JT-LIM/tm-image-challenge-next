@@ -195,6 +195,10 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   function setScoringPhoto(files: FileList | null) {
     const file = Array.from(files || []).find((item) => item.type.startsWith("image/"));
     if (!file) return;
+    if (!file.type.match(/^image\/(jpeg|png|webp|gif)$/)) {
+      setNotice("이 이미지 형식은 브라우저가 읽기 어려울 수 있어요. JPG 또는 PNG로 저장해서 다시 넣어주세요.");
+      return;
+    }
     setChallengePhoto((current) => {
       if (current) URL.revokeObjectURL(current.url);
       return {
@@ -277,7 +281,8 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       const winners = scored.filter((result) => result.lastCorrect).map((result) => result.teamName);
       setNotice(winners.length ? `이번 사진 정답 팀: ${winners.join(", ")}` : "이번 사진을 맞춘 팀이 없습니다.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "채점 실패");
+      const message = error instanceof Error ? error.message : "채점 실패";
+      setNotice(message.includes("decode") || message.includes("decoded") ? "이미지를 읽을 수 없습니다. JPG 또는 PNG 파일로 다시 저장해서 넣어주세요." : message);
     } finally {
       setBusy(false);
     }

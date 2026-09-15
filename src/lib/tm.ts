@@ -100,7 +100,30 @@ export async function imageElementForPhoto(photo: EvaluationPhoto) {
   const image = new Image();
   image.decoding = "async";
   image.src = photo.url;
-  await image.decode();
+
+  try {
+    if (typeof image.decode === "function") {
+      await image.decode();
+      return image;
+    }
+  } catch {
+    // Fall back to the load event below. Some browsers reject decode() for
+    // object URLs even when the image can still be rendered.
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    if (image.complete && image.naturalWidth > 0) {
+      resolve();
+      return;
+    }
+    image.addEventListener("load", () => resolve(), { once: true });
+    image.addEventListener("error", () => reject(new Error("이미지를 읽을 수 없습니다. JPG 또는 PNG 파일로 다시 저장해서 넣어주세요.")), { once: true });
+  });
+
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error("이미지를 읽을 수 없습니다. JPG 또는 PNG 파일로 다시 저장해서 넣어주세요.");
+  }
+
   return image;
 }
 
