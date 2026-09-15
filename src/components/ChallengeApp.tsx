@@ -389,7 +389,12 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
             {!isTeacher && (
               <form className="model-form" onSubmit={submitModel}>
                 <input name="teamName" placeholder="팀 이름" defaultValue={submissions.find((item) => item.ownerUid === user?.uid)?.teamName || ""} />
-                <input name="modelUrl" placeholder="Teachable Machine 모델 링크" defaultValue={submissions.find((item) => item.ownerUid === user?.uid)?.modelUrl || ""} />
+                <div className="model-link-row">
+                  <input name="modelUrl" placeholder="Teachable Machine 모델 링크" defaultValue={submissions.find((item) => item.ownerUid === user?.uid)?.modelUrl || ""} />
+                  <a className="tm-link-button" href="https://teachablemachine.withgoogle.com/train/image" target="_blank" rel="noreferrer">
+                    티쳐블머신 열기
+                  </a>
+                </div>
                 <button type="submit">모델 제출</button>
               </form>
             )}
