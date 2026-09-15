@@ -44,6 +44,8 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   }, []);
 
   const isTeacher = Boolean(user && room && user.uid === room.teacherUid);
+  const canManageRoom = adminMode && isTeacher;
+  const canSubmitModel = Boolean(room && !adminMode);
 
   useEffect(() => {
     if (!firebase) return;
@@ -373,20 +375,20 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       )}
 
       {room && (
-        <section className="workspace-grid">
+        <section className={`workspace-grid ${canManageRoom ? "" : "student-workspace"}`}>
           <section className="panel student-panel">
             <div className="panel-head">
               <div>
-                <span className="section-kicker">{isTeacher ? "Teacher" : "Student"}</span>
+                <span className="section-kicker">{canManageRoom ? "Teacher" : "Student"}</span>
                 <h2>{room.title}</h2>
-                <p>{isTeacher ? "교사 화면" : "학생 화면"}</p>
+                <p>{canManageRoom ? "교사 화면" : "학생 화면"}</p>
               </div>
               <span className="badge">{submissions.length}팀 제출</span>
             </div>
             <div className="label-row">
               {room.labels.map((label) => <span key={label}>{label}</span>)}
             </div>
-            {!isTeacher && (
+            {canSubmitModel && (
               <form className="model-form" onSubmit={submitModel}>
                 <input name="teamName" placeholder="팀 이름" defaultValue={submissions.find((item) => item.ownerUid === user?.uid)?.teamName || ""} />
                 <div className="model-link-row">
@@ -398,10 +400,10 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
                 <button type="submit">모델 제출</button>
               </form>
             )}
-            <SubmissionList submissions={submissions} isTeacher={isTeacher} onRemove={removeSubmission} />
+            <SubmissionList submissions={submissions} isTeacher={canManageRoom} onRemove={removeSubmission} />
           </section>
 
-          {adminMode && isTeacher && (
+          {canManageRoom && (
             <section className="panel teacher-panel">
               <div className="panel-head">
                 <div>

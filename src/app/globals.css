@@ -891,3 +891,17 @@ pre {
     grid-template-columns: 1fr;
   }
 }
+
+.workspace-grid.student-workspace {
+  grid-template-columns: minmax(340px, 0.95fr) minmax(430px, 1.05fr);
+}
+
+.workspace-grid.student-workspace .results-panel {
+  grid-column: auto;
+}
+
+@media (max-width: 1180px) {
+  .workspace-grid.student-workspace {
+    grid-template-columns: 1fr;
+  }
+}
