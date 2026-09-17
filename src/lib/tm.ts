@@ -28,7 +28,7 @@ export function normalizeText(value: string) {
 }
 
 export function normalizeForCompare(value: string) {
-  return normalizeText(value).toLowerCase();
+  return normalizeText(value).toLowerCase().replace(/\s+/g, "");
 }
 
 export function normalizeRoomCode(value: string) {
