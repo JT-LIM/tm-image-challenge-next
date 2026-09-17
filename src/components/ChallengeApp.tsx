@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -36,6 +36,7 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   const [challengePhoto, setChallengePhoto] = useState<EvaluationPhoto | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const challengePhotoUrlRef = useRef<string | null>(null);
 
   const firebase = useMemo(() => {
     if (!firebaseStatus.configured) return null;
@@ -96,9 +97,9 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
 
   useEffect(() => {
     return () => {
-      if (challengePhoto) URL.revokeObjectURL(challengePhoto.url);
+      if (challengePhotoUrlRef.current) URL.revokeObjectURL(challengePhotoUrlRef.current);
     };
-  }, [challengePhoto]);
+  }, []);
 
   function leaveRoom() {
     setActiveCode("");
@@ -199,15 +200,15 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
       setNotice("이 이미지 형식은 브라우저가 읽기 어려울 수 있어요. JPG 또는 PNG로 저장해서 다시 넣어주세요.");
       return;
     }
-    setChallengePhoto((current) => {
-      if (current) URL.revokeObjectURL(current.url);
-      return {
-        id: `${file.name}-${crypto.randomUUID()}`,
-        file,
-        name: file.name.replace(/\.[^.]+$/, ""),
-        url: URL.createObjectURL(file),
-        answer: room?.labels[0] || "",
-      };
+    if (challengePhotoUrlRef.current) URL.revokeObjectURL(challengePhotoUrlRef.current);
+    const url = URL.createObjectURL(file);
+    challengePhotoUrlRef.current = url;
+    setChallengePhoto({
+      id: `${file.name}-${crypto.randomUUID()}`,
+      file,
+      name: file.name.replace(/\.[^.]+$/, ""),
+      url,
+      answer: room?.labels[0] || "",
     });
   }
 
@@ -216,10 +217,9 @@ export default function ChallengeApp({ adminMode = false }: { adminMode?: boolea
   }
 
   function clearScoringPhoto() {
-    setChallengePhoto((current) => {
-      if (current) URL.revokeObjectURL(current.url);
-      return null;
-    });
+    if (challengePhotoUrlRef.current) URL.revokeObjectURL(challengePhotoUrlRef.current);
+    challengePhotoUrlRef.current = null;
+    setChallengePhoto(null);
   }
 
   async function runScoring() {
